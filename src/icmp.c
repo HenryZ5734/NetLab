@@ -11,6 +11,22 @@
 static void icmp_resp(buf_t *req_buf, uint8_t *src_ip)
 {
     // TO-DO
+    // step1：封装报头和数据
+    buf_init(&txbuf, req_buf->len);
+    memcpy(txbuf.data, req_buf->data, req_buf->len);
+    icmp_hdr_t *pkt = (icmp_hdr_t *)txbuf.data;
+    icmp_hdr_t *req_pkt = (icmp_hdr_t *)req_buf->data;
+    pkt->type = ICMP_TYPE_ECHO_REPLY;
+    pkt->code = 0;
+    pkt->id16 = req_pkt->id16;
+    pkt->seq16 = req_pkt->seq16;
+    pkt->checksum16 = 0;
+
+    // step2：计算校验和
+    pkt->checksum16 = checksum16((uint16_t *)pkt, txbuf.len); 
+
+    // step3：发送报文
+    ip_out(&txbuf, src_ip, NET_PROTOCOL_ICMP);
 }
 
 /**
@@ -22,6 +38,16 @@ static void icmp_resp(buf_t *req_buf, uint8_t *src_ip)
 void icmp_in(buf_t *buf, uint8_t *src_ip)
 {
     // TO-DO
+    // step1：检测数据包长度
+    if(buf->len < sizeof(icmp_hdr_t)){
+        return ;
+    }
+
+    // step2：查看该报文的ICMP类型是否为回显请求
+    icmp_hdr_t *pkt = (icmp_hdr_t *)buf->data;
+    if(pkt->type == ICMP_TYPE_ECHO_REQUEST){
+        icmp_resp(buf, src_ip);
+    }
 }
 
 /**
@@ -34,6 +60,24 @@ void icmp_in(buf_t *buf, uint8_t *src_ip)
 void icmp_unreachable(buf_t *recv_buf, uint8_t *src_ip, icmp_code_t code)
 {
     // TO-DO
+    int pkt_len = sizeof(icmp_hdr_t) + sizeof(ip_hdr_t) + 8;
+
+    // step1：填写icmp报头首部
+    buf_init(&txbuf, sizeof(ip_hdr_t) + 8);
+    memcpy(txbuf.data, recv_buf->data, sizeof(ip_hdr_t) + 8);
+    buf_add_header(&txbuf, sizeof(icmp_hdr_t));
+    icmp_hdr_t *pkt = (icmp_hdr_t *)txbuf.data;
+    pkt->type = ICMP_TYPE_UNREACH;
+    pkt->code = code;
+    pkt->id16 = 0;
+    pkt->seq16 = 0;
+    pkt->checksum16 = 0;
+
+    // step2：计算校验和
+    pkt->checksum16 = checksum16((uint16_t *)txbuf.data, pkt_len);
+
+    // step3：发送报文
+    ip_out(&txbuf, src_ip, NET_PROTOCOL_ICMP);
 }
 
 /**

@@ -59,7 +59,7 @@ int main(int argc, char const *argv[])
 #endif
         // 节约用电
         struct timespec sleepTime = { 0, 1000000 };
-        nanosleep(&sleepTime, NULL);
+        // nanosleep(&sleepTime, NULL);
     }
 
     return 0;

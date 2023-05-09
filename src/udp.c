@@ -19,6 +19,28 @@ map_t udp_table;
 static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dst_ip)
 {
     // TO-DO
+    // step1：添加udp伪头部
+    buf_add_header(buf, sizeof(udp_peso_hdr_t));
+    udp_peso_hdr_t *peso_pkt = (udp_peso_hdr_t *)buf->data;
+    udp_peso_hdr_t ip_save;
+    memcpy(&ip_save, buf->data, sizeof(udp_peso_hdr_t));
+    memcpy(peso_pkt->src_ip, src_ip, NET_IP_LEN);
+    memcpy(peso_pkt->dst_ip, dst_ip, NET_IP_LEN);
+    peso_pkt->placeholder = 0;
+    peso_pkt->protocol = NET_PROTOCOL_UDP;
+    peso_pkt->total_len16 = swap16(buf->len - sizeof(udp_peso_hdr_t));
+
+    // step2：计算校验和
+    if((peso_pkt->total_len16 - sizeof(udp_hdr_t)) % 2 != 0){
+        buf_add_padding(buf, 1);
+    }
+    uint16_t checksum = checksum16((uint16_t *)buf->data, buf->len);
+
+    // step3：恢复ip头部，删除伪头部
+    memcpy(buf->data, &ip_save, sizeof(udp_peso_hdr_t));
+    buf_remove_header(buf, sizeof(udp_peso_hdr_t));
+    
+    return checksum;
 }
 
 /**
@@ -30,6 +52,31 @@ static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dst_ip)
 void udp_in(buf_t *buf, uint8_t *src_ip)
 {
     // TO-DO
+    // step1：长度检查
+    udp_hdr_t * pkt = (udp_hdr_t *)buf->data;
+    if(buf->len < sizeof(udp_hdr_t) || buf->len < swap16(pkt->total_len16)){
+        return ;
+    }
+
+    // step2:校验和检查
+    uint16_t checksum = pkt->checksum16;
+    pkt->checksum16 = 0;
+    if(checksum != udp_checksum(buf, src_ip, net_if_ip)){
+        return ;
+    }
+    pkt->checksum16 = checksum;
+
+    // step3:调用处理函数
+    uint16_t dst_port = swap16(pkt->dst_port16);
+    udp_handler_t *handler = map_get(&udp_table, &dst_port);
+    if(handler == NULL){
+        buf_add_header(buf, sizeof(ip_hdr_t));
+        icmp_unreachable(buf, src_ip, ICMP_CODE_PORT_UNREACH);
+    }
+    else{
+        buf_remove_header(buf, sizeof(udp_hdr_t));
+        (* handler)(buf->data, buf->len, src_ip, swap16(pkt->src_port16));
+    }
 }
 
 /**
@@ -43,6 +90,16 @@ void udp_in(buf_t *buf, uint8_t *src_ip)
 void udp_out(buf_t *buf, uint16_t src_port, uint8_t *dst_ip, uint16_t dst_port)
 {
     // TO-DO
+    // step1：填充udp头部
+    buf_add_header(buf, sizeof(udp_hdr_t));
+    udp_hdr_t * pkt = (udp_hdr_t *)buf->data;
+    pkt->src_port16 = swap16(src_port);
+    pkt->dst_port16 = swap16(dst_port);
+    pkt->total_len16 = swap16(buf->len); 
+    pkt->checksum16 = 0;
+
+    // step2：发送udp数据报
+    ip_out(buf, dst_ip, NET_PROTOCOL_UDP);
 }
 
 /**
